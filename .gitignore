@@ -1,0 +1,40 @@
+# data & artifacts
+data/
+out/
+runs/
+*.dem
+*.dem.zst
+*.mp4
+*.parquet
+*.log
+
+# secrets
+.env
+*.secret
+
+# browser drivers (fetch at runtime, never commit)
+chromedriver
+chromedriver.exe
+geckodriver
+
+# python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+dist/
+build/
+
+# slurm
+slurm-*.out
+*.sbatch.log
+
+# os / editor
+.DS_Store
+.idea/
+.vscode/
+logs/

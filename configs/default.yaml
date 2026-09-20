@@ -1,0 +1,98 @@
+# multi-ego-cs default configuration.
+#
+# Copy this file, edit, and pass it with `mecs --config my.yaml <stage>`.
+# Secrets are NOT stored here - export them instead:
+#   export MECS_FACEIT_API_KEY=...   # stage 01
+#   export HF_TOKEN=...              # stage 08 (needs *write* scope)
+
+data_root: ./data
+
+discover:
+  target_matches: 100
+  region: EU                # EU | NA | SA | AS | OCE
+  num_players: 200
+  matches_per_player: 20
+  min_elo: 2000
+  maps: []                  # [] = any map; e.g. [de_mirage, de_dust2]
+  language: ""              # requires voice transcription; "" disables
+  min_rounds: 16
+  request_timeout: 30.0
+  requests_per_minute: 250
+
+download:
+  max_total_gb: 2000.0
+  concurrency: 4
+  retries: 3
+  retry_backoff_seconds: 5.0
+  decompress: true
+  keep_archive: false
+  allow_browser_fallback: true
+  browser_headless: true
+
+# Stage 04 is Windows-only. Set these on the capture machine.
+record:
+  cs2_csgo_dir: 'C:\Program Files (x86)\Steam\steamapps\common\Counter-Strike Global Offensive\game\csgo'
+  cs2_launch_target: steam://rungameid/730
+  capture_output_dir: ''    # REQUIRED: your capture tool's output folder
+  capture_hotkey: [alt, f9]
+  demo_load_wait_seconds: 60.0
+  between_demo_pause_seconds: 10.0
+  command_pause_seconds: 0.1
+  game_boot_wait_seconds: 40.0
+  spec_player_offset: 4
+  tickrate: 64
+
+actions:
+  tickrate: 64
+  workers: 0                # 0 = auto (respects SLURM_CPUS_PER_TASK)
+  cpu_fraction: 0.85
+  compression: zstd
+  compression_level: 3
+  keep_raw_buttons: true
+  rounds: []                # [] = all rounds; e.g. [1, 13] for pistol rounds
+
+align:
+  reference_width: 1280
+  reference_height: 720
+  digit_boxes:              # (x1, y1, x2, y2) of the HUD timer digits
+    - [624, 5, 632, 18]     #   minutes
+    - [638, 5, 646, 18]     #   tens of seconds
+    - [647, 5, 655, 18]     #   units of seconds
+  round_clock_seconds: 115  # 1:55 - MR12 default mp_roundtime
+  max_scan_seconds: 12.0
+  min_match_score: 0.35
+  max_offset_deviation_seconds: 2.0
+  workers: 0
+  templates_dir: ''         # '' = packaged assets/digit_templates
+
+package:
+  variants:
+    native: {}              # {} = publish source recordings unchanged
+    # Add downscaled variants for training-friendly sizes:
+    # small:
+    #   width: 306
+    #   height: 306
+    #   fps: 4
+    #   vcodec: libx264
+    #   crf: 28
+    #   preset: veryfast
+  splits:
+    train: 0.7
+    val: 0.15
+    test: 0.15
+  split_seed: 1999
+  split_by: match           # never 'round' - rounds within a match leak
+  ffmpeg: ffmpeg
+  workers: 0
+  use_hardlinks: true
+
+publish:
+  repo_id: ''               # e.g. wangyz1999/X-EGO-CS
+  repo_type: dataset
+  private: false
+  revision: main
+  files_per_commit: 400
+  commit_message: Add multi-ego-cs release
+  include: [README.md, match_round_partitioned.csv, manifest, metadata, align, state_action, video, demo]
+  max_workers: 8
+  enable_hf_transfer: true

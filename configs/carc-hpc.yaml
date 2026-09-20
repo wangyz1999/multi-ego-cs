@@ -1,0 +1,35 @@
+# Configuration for the USC CARC cluster (Discovery / Endeavour).
+#
+# Differences from default.yaml:
+#   * data_root lives on /scratch1 (large, fast, NOT backed up, and purged
+#     during maintenance — keep only regenerable data there; the recordings
+#     and .dem files must live on /project2 and be symlinked in)
+#   * workers left at 0 so SLURM_CPUS_PER_TASK decides
+#   * ffmpeg comes from the module tree (`module load ffmpeg`)
+#
+# Usage:
+#   sbatch slurm/05_actions.sbatch
+#   sbatch slurm/06_align.sbatch
+
+data_root: /scratch1/${USER}/multi-ego-cs
+
+actions:
+  workers: 0
+  cpu_fraction: 0.85
+  compression: zstd
+  compression_level: 3
+
+align:
+  workers: 0
+
+package:
+  use_hardlinks: true
+  ffmpeg: ffmpeg
+  variants:
+    native: {}
+
+publish:
+  repo_id: wangyz1999/X-EGO-CS
+  repo_type: dataset
+  files_per_commit: 300
+  enable_hf_transfer: true

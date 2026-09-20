@@ -1,0 +1,77 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "multi-ego-cs"
+version = "0.1.0"
+description = "End-to-end pipeline for collecting synchronized multi-egocentric Counter-Strike 2 gameplay datasets"
+readme = "README.md"
+license = { text = "MIT" }
+requires-python = ">=3.11"
+authors = [{ name = "Yunzhe Wang" }]
+keywords = ["counter-strike", "cs2", "egocentric", "video", "dataset", "multi-agent", "esports"]
+classifiers = [
+  "License :: OSI Approved :: MIT License",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+
+# Core dependencies: everything needed for discover / metadata / actions /
+# align / package / publish. Recording is Windows-only and lives in an extra.
+dependencies = [
+  "awpy>=2.0.2",
+  "demoparser2>=0.41.1",
+  "polars>=1.17",
+  "numpy>=1.26",
+  "opencv-python-headless>=4.10",
+  "requests>=2.31",
+  "huggingface-hub>=0.27",
+  "pyyaml>=6.0",
+  "tqdm>=4.66",
+]
+
+[project.optional-dependencies]
+# Stage 02 (demo download) drives a real browser to reach FACEIT's download button.
+download = [
+  "selenium>=4.15",
+  "undetected-chromedriver>=3.5",
+]
+# Stage 04 (recording) only runs on a Windows gaming machine with CS2 installed.
+record = [
+  "pyautogui>=0.9.54",
+  "pygetwindow>=0.0.9",
+  "psutil>=5.9",
+]
+# Faster large-file uploads to the Hugging Face Hub.
+fast-upload = ["hf-transfer>=0.1.6"]
+viewer = ["flask>=3.0"]
+dev = ["pytest>=8.0", "ruff>=0.6"]
+all = ["multi-ego-cs[download,record,fast-upload,viewer,dev]"]
+
+[project.scripts]
+mecs = "multi_ego_cs.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/wangyz1999/multi-ego-cs"
+Dataset = "https://huggingface.co/datasets/wangyz1999/X-EGO-CS"
+Paper = "https://arxiv.org/abs/2510.19150"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/multi_ego_cs"]
+
+[tool.hatch.build.targets.wheel.force-include]
+"assets/digit_templates" = "multi_ego_cs/assets/digit_templates"
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "W"]
+ignore = ["B008"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
