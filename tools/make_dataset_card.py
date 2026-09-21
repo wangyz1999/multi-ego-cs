@@ -279,24 +279,39 @@ full = clips.filter(
 )
 
 row = full.row(0, named=True)
-m, r, s = row["match_id"], row["round_number"], row["steamid"]
+
+# NOTE: csv readers infer `steamid` as an integer, but it keys the offsets JSON
+# as a *string*. Cast it, or the lookup raises KeyError.
+steamid = str(row["steamid"])
 
 # Paths come from the manifest, so the layout is never guessed.
 video = f"{{root}}/{{row['video_path']}}"
 traj  = pl.read_parquet(f"{{root}}/{{row['actions_path']}}")
-off   = json.load(open(f"{{root}}/{{row['align_path']}}"))["players"][s]
+off   = json.load(open(f"{{root}}/{{row['align_path']}}"))["players"][steamid]
 ```
 
 ### Aligning video with ticks
 
 ```python
 video_time  = game_sec + offset_sec      # the only sign convention used here
-frame_index = round(video_time * offset["video_fps"])
+frame_index = round(video_time * off["video_fps"])
 ```
 
 `offset_sec` is typically negative (−0.7 to −3 s): the round goes live shortly
-before the capture's first frame. Use the per-player value for single-player
-work and `round_offset_sec` when compositing several views into a grid.
+*before* the capture's first frame. Two consequences worth handling:
+
+- **Early ticks map to negative frame indices.** For a −0.768 s offset at
+  30 fps, tick 0 is frame −23. Most video libraries treat a negative index as
+  counting from the end, so you would silently read the *last* frame of the
+  clip. Drop or clamp frames below zero:
+
+  ```python
+  traj = traj.filter((pl.col("game_sec") + off["offset_sec"]) >= 0)
+  ```
+
+- **Use the per-player `offset_sec`** for single-player work, and
+  `round_offset_sec` (the mean over non-outlier players) when compositing
+  several views into one synchronised grid.
 
 ## How it was collected
 
