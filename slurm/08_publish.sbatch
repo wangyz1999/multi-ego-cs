@@ -21,10 +21,24 @@
 
 source "${MECS_REPO_ROOT:-$HOME/projects/multi-ego-cs}/slurm/_common.sh"
 
-if [[ -z "${HF_TOKEN:-}" ]]; then
-  echo "ERROR: HF_TOKEN is not set in the job environment." >&2
-  echo "SLURM does not inherit your login shell, so export it at submit time:" >&2
-  echo "  HF_TOKEN=\$(cat ~/.cache/huggingface/token) sbatch --export=ALL slurm/08_publish.sbatch --yes" >&2
+# A token can come from the environment OR from `hf auth login`'s credential
+# store, which lives in $HOME and so IS visible inside a job. Check whether one
+# resolves at all rather than insisting on the env var - demanding HF_TOKEN
+# would reject a perfectly good stored credential and push people toward
+# pasting secrets into job scripts.
+if ! "$PYTHON" - <<'PYCHECK'
+import sys
+try:
+    from huggingface_hub import get_token
+    sys.exit(0 if get_token() else 1)
+except Exception:
+    sys.exit(1)
+PYCHECK
+then
+  echo "ERROR: no Hugging Face token available in this job." >&2
+  echo "Fix either way:" >&2
+  echo "  hf auth login                       # stores it under \$HOME (recommended)" >&2
+  echo "  HF_TOKEN=... sbatch --export=ALL slurm/08_publish.sbatch --yes" >&2
   exit 1
 fi
 

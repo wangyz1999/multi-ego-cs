@@ -18,6 +18,7 @@ Requires a write-scoped token in ``HF_TOKEN``.
 from __future__ import annotations
 
 import os
+import time
 from pathlib import Path
 from typing import Any
 
@@ -26,6 +27,13 @@ from ..util.io_utils import du_bytes, human_bytes
 from ..util.logging_setup import get_logger
 
 log = get_logger("publish")
+
+# A commit is retried this many times before the run gives up. Generous on
+# purpose: resuming costs a full re-listing of the remote, while waiting out a
+# network blip costs seconds.
+_MAX_COMMIT_ATTEMPTS = 6
+_RETRY_BASE_SECONDS = 15.0
+_RETRY_MAX_SECONDS = 300.0
 
 # Uploaded in this order: cheap and structural first, bulk video last.
 _DEFAULT_ORDER = ["README.md", "manifest", "metadata", "align", "state_action", "video", "demo"]
@@ -233,22 +241,54 @@ def run(
 
     uploaded = 0
     for index, chunk in enumerate(chunks, start=1):
-        operations = [
-            CommitOperationAdd(path_in_repo=rel, path_or_fileobj=str(path))
-            for path, rel in chunk
-        ]
         chunk_bytes = sum(p.stat().st_size for p, _ in chunk)
         log.info(
             "commit %d/%d: %d files, %s",
             index, len(chunks), len(chunk), human_bytes(chunk_bytes),
         )
-        api.create_commit(
-            repo_id=pcfg.repo_id,
-            repo_type=pcfg.repo_type,
-            revision=rev,
-            operations=operations,
-            commit_message=f"{pcfg.commit_message} ({index}/{len(chunks)})",
-        )
+
+        # Retry each commit. A 200 GB upload runs for hours across a few
+        # hundred commits, so a transient network fault is not an exceptional
+        # event - it is the expected case at least once. Without this, one
+        # dropped connection ends the whole run. Operations are rebuilt each
+        # attempt because a CommitOperationAdd may have consumed its handle.
+        backoff = _RETRY_BASE_SECONDS
+        last_error: Exception | None = None
+        for attempt in range(1, _MAX_COMMIT_ATTEMPTS + 1):
+            try:
+                api.create_commit(
+                    repo_id=pcfg.repo_id,
+                    repo_type=pcfg.repo_type,
+                    revision=rev,
+                    operations=[
+                        CommitOperationAdd(path_in_repo=rel, path_or_fileobj=str(path))
+                        for path, rel in chunk
+                    ],
+                    commit_message=f"{pcfg.commit_message} ({index}/{len(chunks)})",
+                )
+                last_error = None
+                break
+            except Exception as exc:  # network, 5xx, rate limit
+                last_error = exc
+                if attempt == _MAX_COMMIT_ATTEMPTS:
+                    break
+                log.warning(
+                    "commit %d/%d failed (attempt %d/%d): %s: %s - retrying in %.0fs",
+                    index, len(chunks), attempt, _MAX_COMMIT_ATTEMPTS,
+                    type(exc).__name__, exc, backoff,
+                )
+                time.sleep(backoff)
+                backoff = min(backoff * 2, _RETRY_MAX_SECONDS)
+
+        if last_error is not None:
+            log.error(
+                "commit %d/%d failed after %d attempts: %s. %d/%d files are "
+                "already on the Hub; re-run the same command to resume from here.",
+                index, len(chunks), _MAX_COMMIT_ATTEMPTS, last_error,
+                uploaded, len(pending),
+            )
+            raise last_error
+
         uploaded += len(chunk)
         log.info("  done - %d/%d files uploaded", uploaded, len(pending))
 
@@ -261,13 +301,24 @@ def run(
             for d in delete_paths
         ]
         log.warning("Deleting superseded path(s): %s", ", ".join(delete_paths))
-        api.create_commit(
-            repo_id=pcfg.repo_id,
-            repo_type=pcfg.repo_type,
-            revision=rev,
-            operations=ops,
-            commit_message=f"Remove superseded path(s): {', '.join(delete_paths)}",
-        )
+        backoff = _RETRY_BASE_SECONDS
+        for attempt in range(1, _MAX_COMMIT_ATTEMPTS + 1):
+            try:
+                api.create_commit(
+                    repo_id=pcfg.repo_id,
+                    repo_type=pcfg.repo_type,
+                    revision=rev,
+                    operations=ops,
+                    commit_message=f"Remove superseded path(s): {', '.join(delete_paths)}",
+                )
+                break
+            except Exception as exc:
+                if attempt == _MAX_COMMIT_ATTEMPTS:
+                    raise
+                log.warning("delete commit failed (%d/%d): %s - retrying in %.0fs",
+                            attempt, _MAX_COMMIT_ATTEMPTS, exc, backoff)
+                time.sleep(backoff)
+                backoff = min(backoff * 2, _RETRY_MAX_SECONDS)
         deleted = len(delete_paths)
         log.info("Deleted %d path(s)", deleted)
 
