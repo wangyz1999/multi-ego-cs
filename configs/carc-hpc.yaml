@@ -23,13 +23,20 @@ align:
   workers: 0
 
 package:
-  use_hardlinks: true
+  link_mode: auto
   ffmpeg: ffmpeg
   variants:
     native: {}
+  # X-Ego-CS v1 published player-major video paths. Keeping them means the 45
+  # matches already on the Hub are recognised as unchanged instead of being
+  # re-uploaded under a second set of names.
+  video_layout: player_major
 
 publish:
   repo_id: wangyz1999/X-EGO-CS
   repo_type: dataset
   files_per_commit: 300
   enable_hf_transfer: true
+  # v1 published trajectories as CSV under trajectory/. state_action/ (parquet)
+  # supersedes it: 101 matches vs 45, in 1.3x the bytes. Removed after upload.
+  delete: [trajectory/]

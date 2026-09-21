@@ -165,6 +165,14 @@ class PackageConfig:
     #   symlink  always a pointer
     #   copy     a self-contained tree you can tar and move
     link_mode: str = "auto"
+    # Directory layout for published video:
+    #   hive          video/match=<id>/round=<n>/<steamid>.mp4   (self-describing)
+    #   player_major  video/<id>/<steamid>/round_<n>.mp4         (X-Ego-CS v1)
+    # Use player_major when updating a dataset that already published that
+    # layout: paths then match, so unchanged clips are skipped instead of
+    # re-uploaded under a second name. Mixing both in one repo duplicates the
+    # video and leaves consumers guessing which tree is canonical.
+    video_layout: str = "hive"
     # Deprecated alias kept for older configs; `link_mode` wins when set.
     use_hardlinks: bool = True
     # Include matches that have video but no demo (and therefore no action
@@ -199,6 +207,12 @@ class PublishConfig:
     )
     max_workers: int = 8
     enable_hf_transfer: bool = True
+    # Repo paths to REMOVE from the Hub. Folders need a trailing slash.
+    # Deletions are applied in a final commit, only after every upload has
+    # succeeded, so the dataset is never missing both the old tree and the new
+    # one. Destructive and irreversible - anything listed here disappears for
+    # every existing consumer of the dataset.
+    delete: list[str] = field(default_factory=list)
 
 
 @dataclass

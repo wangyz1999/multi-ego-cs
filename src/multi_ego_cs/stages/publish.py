@@ -58,12 +58,26 @@ def _iter_local_files(release: Path, include: list[str]) -> list[tuple[Path, str
     return out
 
 
-def _remote_files(api: Any, repo_id: str, repo_type: str, revision: str) -> set[str]:
+def _remote_index(
+    api: Any, repo_id: str, repo_type: str, revision: str
+) -> dict[str, int | None]:
+    """Remote path -> size in bytes (None when the Hub does not report one).
+
+    Sizes, not just paths, because this stage's main job is *updating* an
+    existing dataset. A path-only comparison would skip every file that already
+    exists under the same name - which is exactly the set of files an update
+    needs to replace: a corrected index, regenerated metadata carrying a new
+    schema, a rewritten card. Those would silently stay stale while the upload
+    reported success.
+    """
     try:
-        return set(api.list_repo_files(repo_id=repo_id, repo_type=repo_type, revision=revision))
+        info = api.dataset_info(repo_id=repo_id, files_metadata=True, revision=revision) \
+            if repo_type == "dataset" else api.model_info(
+                repo_id=repo_id, files_metadata=True, revision=revision)
+        return {s.rfilename: getattr(s, "size", None) for s in (info.siblings or [])}
     except Exception as exc:
         log.warning("Could not list remote files (%s); treating repo as empty.", exc)
-        return set()
+        return {}
 
 
 def run(
@@ -72,8 +86,13 @@ def run(
     dry_run: bool = False,
     include: list[str] | None = None,
     revision: str | None = None,
+    reupload: list[str] | None = None,
+    delete: list[str] | None = None,
 ) -> dict[str, Any]:
-    from huggingface_hub import CommitOperationAdd, HfApi
+    from huggingface_hub import CommitOperationAdd, CommitOperationDelete, HfApi
+
+    force_paths = set(reupload or ())
+    delete_paths = list(delete if delete is not None else (cfg.publish.delete or ()))
 
     pcfg = cfg.publish
     layout = cfg.layout
@@ -128,14 +147,36 @@ def run(
         log.info("Repo %s does not exist; it will be created (private=%s)",
                  pcfg.repo_id, pcfg.private)
 
-    remote = _remote_files(api, pcfg.repo_id, pcfg.repo_type, rev) if exists else set()
-    pending = [(p, rel) for p, rel in files if rel not in remote]
+    remote = _remote_index(api, pcfg.repo_id, pcfg.repo_type, rev) if exists else {}
+
+    pending: list[tuple[Path, str]] = []
+    replacing: list[str] = []
+    unchanged = 0
+    for path, rel in files:
+        local_size = path.stat().st_size
+        if rel not in remote:
+            pending.append((path, rel))
+            continue
+        remote_size = remote[rel]
+        if remote_size is not None and remote_size == local_size and rel not in force_paths:
+            unchanged += 1
+            continue
+        pending.append((path, rel))
+        replacing.append(rel)
+
     pending_bytes = sum(p.stat().st_size for p, _ in pending)
 
     log.info(
-        "Remote has %d files; %d local files already present, %d to upload (%s)",
-        len(remote), len(files) - len(pending), len(pending), human_bytes(pending_bytes),
+        "Remote has %d files; %d unchanged, %d new, %d to replace -> %d to upload (%s)",
+        len(remote), unchanged, len(pending) - len(replacing), len(replacing),
+        len(pending), human_bytes(pending_bytes),
     )
+    if replacing:
+        log.info("Replacing %d existing file(s) whose content differs, e.g.:", len(replacing))
+        for rel in replacing[:8]:
+            log.info("    %s  (remote %s -> local %s)", rel,
+                     human_bytes(remote[rel] or 0),
+                     human_bytes((release / rel).stat().st_size))
 
     if not pending:
         log.info("Remote already has every local file - nothing to do.")
@@ -146,10 +187,25 @@ def run(
         by_prefix[rel.split("/")[0]] = by_prefix.get(rel.split("/")[0], 0) + 1
     log.info("Pending by top-level path: %s", by_prefix)
 
+    if delete_paths:
+        doomed = [
+            r for r in remote
+            if any(r == d or r.startswith(d if d.endswith("/") else d + "/") for d in delete_paths)
+        ]
+        doomed_bytes = sum(remote[r] or 0 for r in doomed)
+        log.warning(
+            "DELETION: %d remote file(s) (%s) under %s will be REMOVED in a "
+            "final commit after all uploads succeed. This is irreversible for "
+            "every existing consumer of the dataset.",
+            len(doomed), human_bytes(doomed_bytes), ", ".join(delete_paths),
+        )
+
     if dry_run:
         log.info("[dry-run] would upload %d files (%s) to %s@%s in %d commit(s)",
                  len(pending), human_bytes(pending_bytes), pcfg.repo_id, rev,
                  -(-len(pending) // pcfg.files_per_commit))
+        if delete_paths:
+            log.info("[dry-run] would then delete: %s", ", ".join(delete_paths))
         for _, rel in pending[:15]:
             log.info("  [dry-run] %s", rel)
         if len(pending) > 15:
@@ -162,7 +218,8 @@ def run(
             f"  repo:   {pcfg.repo_id} ({pcfg.repo_type}, "
             f"{'private' if pcfg.private else 'PUBLIC'})\n"
             f"  files:  {len(pending)}  ({human_bytes(pending_bytes)})\n"
-            f"Re-run with --yes to proceed, or --dry-run to inspect the plan."
+            + (f"  DELETE: {', '.join(delete_paths)}\n" if delete_paths else "")
+            + "Re-run with --yes to proceed, or --dry-run to inspect the plan."
         )
 
     if not exists:
@@ -195,8 +252,30 @@ def run(
         uploaded += len(chunk)
         log.info("  done - %d/%d files uploaded", uploaded, len(pending))
 
+    deleted = 0
+    if delete_paths:
+        # Last, and only now: every byte of the replacement is on the Hub, so
+        # removing the superseded tree cannot leave the dataset incomplete.
+        ops = [
+            CommitOperationDelete(path_in_repo=d, is_folder=d.endswith("/"))
+            for d in delete_paths
+        ]
+        log.warning("Deleting superseded path(s): %s", ", ".join(delete_paths))
+        api.create_commit(
+            repo_id=pcfg.repo_id,
+            repo_type=pcfg.repo_type,
+            revision=rev,
+            operations=ops,
+            commit_message=f"Remove superseded path(s): {', '.join(delete_paths)}",
+        )
+        deleted = len(delete_paths)
+        log.info("Deleted %d path(s)", deleted)
+
     log.info("Published %d files to https://huggingface.co/datasets/%s", uploaded, pcfg.repo_id)
-    return {"uploaded": uploaded, "commits": len(chunks), "bytes": pending_bytes}
+    return {
+        "uploaded": uploaded, "commits": len(chunks),
+        "bytes": pending_bytes, "deleted_paths": deleted,
+    }
 
 
 def upload_card(cfg: Config, card_path: str | Path, yes: bool = False) -> dict[str, Any]:

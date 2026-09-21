@@ -124,6 +124,9 @@ def _build_parser() -> argparse.ArgumentParser:
     p.add_argument("--include", help="comma-separated subset of release/ to upload")
     p.add_argument("--revision", help="target branch (default: main)")
     p.add_argument("--yes", action="store_true", help="confirm the upload")
+    p.add_argument("--reupload", help="comma-separated repo paths to re-upload even if unchanged")
+    p.add_argument("--delete", help="comma-separated repo paths to DELETE after uploading "
+                                    "(folders need a trailing slash); irreversible")
     p.add_argument("--dry-run", action="store_true")
 
     p = sub.add_parser("card", parents=[common], help="upload only the dataset card")
@@ -287,8 +290,15 @@ def _dispatch(command: str, cfg: Config, args: argparse.Namespace) -> Any:
         if args.repo_id:
             cfg.publish.repo_id = args.repo_id
         include = [i.strip() for i in args.include.split(",")] if args.include else None
+        reupload = (
+            [x.strip() for x in args.reupload.split(",")] if getattr(args, "reupload", None) else None
+        )
+        deletions = (
+            [x.strip() for x in args.delete.split(",")] if getattr(args, "delete", None) else None
+        )
         return publish.run(
-            cfg, yes=args.yes, dry_run=args.dry_run, include=include, revision=args.revision
+            cfg, yes=args.yes, dry_run=args.dry_run, include=include,
+            revision=args.revision, reupload=reupload, delete=deletions,
         )
 
     if command == "card":

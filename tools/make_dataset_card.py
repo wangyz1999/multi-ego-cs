@@ -62,24 +62,66 @@ def build(release: Path, repo_id: str, paper: str, code: str) -> str:
     n_with_actions = len([m for m in matches if int(m.get("n_actions") or 0) > 0])
 
     # ---- map table, split into full-modality vs video-only -----------------
-    map_rows = []
     action_maps = Counter()
     for m in matches:
         if int(m.get("n_actions") or 0) > 0:
             action_maps[m["map_name"]] += 1
+
+    # Only carry the coverage columns when there is actually a gap to report.
+    # An all-zeros "Video only" column is noise that makes the table look like
+    # it is hiding something.
+    any_gap = any(action_maps.get(n, 0) != t for n, t in maps.items())
+    map_header = (
+        "| Map | Matches | With actions | Video only |\n|---|---|---|---|"
+        if any_gap else "| Map | Matches | Share |\n|---|---|---|"
+    )
+    map_rows = []
     for name, total in sorted(maps.items(), key=lambda kv: -kv[1]):
         label = MAP_LABEL.get(name, name)
-        with_act = action_maps.get(name, 0)
-        map_rows.append(
-            f"| {label} (`{name}`) | {total} | {with_act} | {total - with_act} |"
-        )
-    map_table = "\n".join(map_rows)
+        if any_gap:
+            with_act = action_maps.get(name, 0)
+            map_rows.append(f"| {label} (`{name}`) | {total} | {with_act} | {total - with_act} |")
+        else:
+            map_rows.append(f"| {label} (`{name}`) | {total} | {total / n_matches * 100:.0f}% |")
+    map_table = map_header + "\n" + "\n".join(map_rows)
 
     split_rows = "\n".join(
         f"| `{s}` | {by_split.get(s, 0)} | {rounds_by_split.get(s, 0)} |"
         for s in ("train", "val", "test")
         if s in by_split or s in rounds_by_split
     )
+
+    # Describe the layout that was actually built, not the default.
+    video_layout = summary.get("video_layout", "hive")
+    video_path_line = (
+        "video/<id>/<steamid>/round_<n>.mp4                first-person recording"
+        if video_layout == "player_major"
+        else "video/match=<id>/round=<n>/<steamid>.mp4          first-person recording"
+    )
+
+    top_map, top_n = max(maps.items(), key=lambda kv: kv[1])
+    limitation_items = []
+    if no_demo:
+        limitation_items.append(
+            f"- **Action coverage is partial**: {len(no_demo)} of {n_matches} matches "
+            f"have video but no tick data, because the demo expired before archival. "
+            f"Recorded per clip in `has_actions`; not backfillable."
+        )
+    aligned = cov["with_alignment"]
+    if aligned < n_clips:
+        missing = n_clips - aligned
+        limitation_items.append(
+            f"- **{_fmt(missing)} of {_fmt(n_clips)} clip{'s' if missing != 1 else ''} "
+            f"{'have' if missing != 1 else 'has'} no measured video↔tick offset** "
+            f"(the HUD timer never resolved cleanly). Check `has_align` per clip "
+            f"and `usable` per round rather than assuming."
+        )
+    limitation_items.append(
+        f"- **Map distribution is skewed** toward "
+        f"{MAP_LABEL.get(top_map, top_map)} ({top_n}/{n_matches} matches); an "
+        f"unconstrained FACEIT sample reflects what players actually queue for."
+    )
+    limitations = "\n".join(limitation_items)
 
     coverage_note = ""
     if no_demo:
@@ -168,7 +210,7 @@ confidence 0.98–0.99; the ten players in a round agree to ~50 ms).
 ## Contents
 
 ```
-video/match=<id>/round=<n>/<steamid>.mp4          first-person recording
+{video_path_line}
 state_action/match=<id>/round=<n>/<steamid>.parquet   64 Hz state + actions
 align/match=<id>/round=<n>/offsets.json           video ↔ tick offsets
 metadata/<id>.json                                rounds, kills, alive windows
@@ -192,8 +234,6 @@ match_round_partitioned.csv                       legacy index
 
 ## Maps
 
-| Map | Matches | With actions | Video only |
-|---|---|---|---|
 {map_table}
 {coverage_note}
 ## Splits
@@ -205,6 +245,23 @@ the match id, so a match keeps its split as the dataset grows.
 | Split | Matches | Rounds |
 |---|---|---|
 {split_rows}
+
+## Changes from v1
+
+If you used an earlier version of this dataset, two things moved:
+
+| v1 | now | why |
+|---|---|---|
+| `trajectory/<id>/<steamid>/round_<n>.csv` | `state_action/match=<id>/round=<n>/<steamid>.parquet` | typed columns, ~1.7x smaller per clip, loads as one table |
+| *(absent)* | `align/match=<id>/round=<n>/offsets.json` | measured video-tick offsets |
+| *(absent)* | `manifest/*.csv`, `manifest/summary.json` | coverage flags and explicit paths per clip |
+
+`trajectory/` has been **removed** — `state_action/` covers every match it did
+and 56 more. Video paths are unchanged, and `match_round_partitioned.csv` keeps
+its columns but now indexes all {_fmt(n_rounds)} rounds instead of a subset.
+
+Rather than hard-coding any of these paths, read them from the manifest:
+`clips.csv` carries `video_path`, `actions_path` and `align_path` per clip.
 
 ## Usage
 
@@ -224,8 +281,10 @@ full = clips.filter(
 row = full.row(0, named=True)
 m, r, s = row["match_id"], row["round_number"], row["steamid"]
 
-traj = pl.read_parquet(f"{{root}}/state_action/match={{m}}/round={{r}}/{{s}}.parquet")
-off = json.load(open(f"{{root}}/align/match={{m}}/round={{r}}/offsets.json"))["players"][s]
+# Paths come from the manifest, so the layout is never guessed.
+video = f"{{root}}/{{row['video_path']}}"
+traj  = pl.read_parquet(f"{{root}}/{{row['actions_path']}}")
+off   = json.load(open(f"{{root}}/{{row['align_path']}}"))["players"][s]
 ```
 
 ### Aligning video with ticks
@@ -253,10 +312,7 @@ capture per match, which is the dominant cost of any collection effort.
 
 ## Limitations
 
-- **Action coverage is partial** where demos expired before archival. This is
-  recorded per clip and cannot be backfilled.
-- **Map distribution is skewed** toward Mirage; an unconstrained FACEIT sample
-  reflects what players actually queue for.
+{limitations}
 - **`usercmd_mouse_dx/dy` are raw device counts, not degrees.** Converting
   needs per-player sensitivity, which demos do not record.
 - **Steam IDs are pseudonymous, not anonymous.** They are real accounts.

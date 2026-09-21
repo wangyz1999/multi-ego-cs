@@ -51,6 +51,7 @@ CLIP_FIELDS = [
     "map_name", "split", "alive_start_tick", "alive_end_tick", "alive_duration_ticks",
     "alive_duration_sec", "died_in_round", "has_video", "has_actions", "has_align",
     "video_offset_sec", "video_fps", "video_bytes",
+    "video_path", "actions_path", "align_path",
 ]
 ROUND_FIELDS = [
     "match_id", "round_number", "map_name", "split", "n_players", "n_video",
@@ -103,6 +104,14 @@ def _round_info(meta: dict[str, Any], round_number: int) -> dict[str, Any]:
         if rinfo.get("round_number") == round_number:
             return rinfo
     return {}
+
+
+def _video_rel_path(layout_name: str, subdir: str, match_id: str,
+                    round_key: str, steamid: str) -> str:
+    """Repo-relative path for one published clip, per `package.video_layout`."""
+    if layout_name == "player_major":
+        return f"{subdir}/{match_id}/{steamid}/round_{round_key}.mp4"
+    return f"{subdir}/match={match_id}/round={round_key}/{steamid}.mp4"
 
 
 def _structure_from_video(layout: Any, match_id: str) -> dict[str, list[dict[str, Any]]]:
@@ -251,6 +260,12 @@ def run(
     link_mode = pcfg.link_mode if getattr(pcfg, "link_mode", None) else (
         "auto" if pcfg.use_hardlinks else "copy"
     )
+    video_layout = getattr(pcfg, "video_layout", "hive")
+    if video_layout not in ("hive", "player_major"):
+        raise ValueError(
+            f"package.video_layout must be 'hive' or 'player_major', got {video_layout!r}"
+        )
+    log.info("Video layout: %s", video_layout)
     log.info(
         "Packaging %d matches into %s (%d metadata-backed, %d video-only, link_mode=%s)",
         len(candidates), release, len(candidates) - len(video_only), len(video_only), link_mode,
@@ -316,6 +331,19 @@ def run(
                 has_align = "offset_sec" in pinfo
 
                 video_bytes = video_src.stat().st_size if has_video else 0
+                video_rel = (
+                    _video_rel_path(video_layout, "video", match_id, round_key, steamid)
+                    if has_video and not skip_video
+                    else None
+                )
+                actions_rel = (
+                    f"state_action/match={match_id}/round={round_key}/{steamid}.parquet"
+                    if has_actions else None
+                )
+                align_rel = (
+                    f"align/match={match_id}/round={round_key}/offsets.json"
+                    if offsets_path.exists() else None
+                )
                 ticks = entry.get("alive_duration_ticks")
                 if ticks is not None:
                     duration_sec = ticks / (meta.get("tickrate") or cfg.actions.tickrate)
@@ -349,6 +377,9 @@ def run(
                         "video_offset_sec": pinfo.get("offset_sec"),
                         "video_fps": pinfo.get("video_fps"),
                         "video_bytes": video_bytes,
+                        "video_path": video_rel,
+                        "actions_path": actions_rel,
+                        "align_path": align_rel,
                     }
                 )
 
@@ -373,7 +404,10 @@ def run(
                 if has_video and not skip_video:
                     for variant, spec in (pcfg.variants or {"native": {}}).items():
                         subdir = "video" if variant == "native" else f"video_{variant}"
-                        dst = release / subdir / f"match={match_id}" / f"round={round_key}" / f"{steamid}.mp4"
+                        rel = _video_rel_path(
+                            video_layout, subdir, match_id, round_key, steamid
+                        )
+                        dst = release / rel
                         if spec:
                             transcode_jobs.append((str(video_src), str(dst), spec, pcfg.ffmpeg))
                         else:
@@ -510,6 +544,7 @@ def run(
         "excluded_unusable": excluded,
         "total_video_sec": round(sum(r["total_video_sec"] for r in match_rows), 2),
         "total_video_hours": round(sum(r["total_video_sec"] for r in match_rows) / 3600, 2),
+        "video_layout": video_layout,
         "split_policy": {
             "granularity": pcfg.split_by,
             "ratios": pcfg.splits,

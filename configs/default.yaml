@@ -84,7 +84,18 @@ package:
   split_by: match           # never 'round' - rounds within a match leak
   ffmpeg: ffmpeg
   workers: 0
-  use_hardlinks: true
+  # How untranscoded files enter the release tree:
+  #   auto     hard-link, else symlink, else copy   (cheapest; default)
+  #   symlink  always a pointer
+  #   copy     a self-contained tree you can tar and move
+  link_mode: auto
+  # Published video layout:
+  #   hive          video/match=<id>/round=<n>/<steamid>.mp4
+  #   player_major  video/<id>/<steamid>/round_<n>.mp4
+  # Match whatever an existing release already published, or paths diverge and
+  # the same clips get uploaded twice under different names.
+  video_layout: hive
+  include_video_only_matches: true
 
 publish:
   repo_id: ''               # e.g. wangyz1999/X-EGO-CS
