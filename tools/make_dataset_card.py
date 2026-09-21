@@ -41,7 +41,15 @@ def _read_csv(path: Path) -> list[dict[str, str]]:
         return list(csv.DictReader(fh))
 
 
-def build(release: Path, repo_id: str, paper: str, code: str) -> str:
+def build(
+    release: Path,
+    repo_id: str,
+    paper: str,
+    code: str,
+    version_label: str = "v2",
+    version_date: str = "",
+    previous_matches: int | None = None,
+) -> str:
     summary = json.loads((release / "manifest" / "summary.json").read_text())
     matches = _read_csv(release / "manifest" / "matches.csv")
     clips = _read_csv(release / "manifest" / "clips.csv")
@@ -98,6 +106,48 @@ def build(release: Path, repo_id: str, paper: str, code: str) -> str:
         if video_layout == "player_major"
         else "video/match=<id>/round=<n>/<steamid>.mp4          first-person recording"
     )
+
+    # Update banner. Deltas are computed where a previous count is supplied so
+    # the banner cannot drift from the data the way a hand-written one would.
+    def _delta(now: int, before: int | None) -> str:
+        if not before:
+            return f"**{_fmt(now)}**"
+        return f"{_fmt(before)} \u2192 **{_fmt(now)}**"
+
+    prev_rounds = prev_clips = None
+    if previous_matches:
+        # v1 shipped a fixed 45-match subset; scale nothing, state only matches.
+        prev_rounds = prev_clips = None
+
+    banner = f"""> ### \U0001F195 Updated \u2014 {version_label}, {version_date}
+>
+> This release changes three things. In short: **more recordings, tick-level
+> action data for every clip, and the collection code itself.**
+>
+> **1 \u2014 More recordings.** {_delta(n_matches, previous_matches)} matches, now
+> spanning **{len(maps)} maps** instead of Mirage only.
+> {_fmt(n_rounds)} rounds, {_fmt(n_clips)} ego-clips, **{hours:,.1f} hours** of
+> synchronized first-person video.
+>
+> **2 \u2014 Tick-level action data, newly extracted.** Every clip now ships a
+> 64 Hz `state_action/*.parquet` trajectory: position, health, view angles,
+> per-tick view deltas, raw mouse counts, and **25 binary key columns** decoded
+> from the engine's input bitfield. Paired with a **measured** video-to-tick
+> offset per clip in `align/*.json` \u2014 read from the in-game HUD timer rather
+> than assumed \u2014 so a frame can be matched to the exact tick that produced it.
+> Coverage is **{cov['actions_pct']:.0f}% actions** and
+> **{cov['alignment_pct']:.0f}% alignment** across all {_fmt(n_clips)} clips.
+>
+> **3 \u2014 The collection pipeline is open source.** Everything here was produced
+> by [`multi-ego-cs`]({code}): an eight-stage, resumable pipeline from FACEIT
+> match discovery through demo download, CS2 replay capture, action extraction,
+> alignment, packaging and publishing. It is released so this dataset can be
+> **reproduced or extended to your own scale** \u2014 see its
+> [scaling guide]({code}/blob/main/docs/COLLECTING_AT_SCALE.md) for what
+> collecting 1000 matches actually costs.
+>
+> Migration note: the v1 `trajectory/*.csv` tree has been **replaced** by
+> `state_action/*.parquet`. See [Changes from v1](#changes-from-v1)."""
 
     top_map, top_n = max(maps.items(), key=lambda kv: kv[1])
     limitation_items = []
@@ -172,6 +222,8 @@ with a 64 Hz stream of that player's exact keyboard, mouse and view-angle
 inputs — all on a common, measured clock.**
 
 [Paper]({paper}) · [Collection pipeline]({code})
+
+{banner}
 
 | | |
 |---|---|
@@ -368,6 +420,12 @@ def main() -> int:
     ap.add_argument("--repo-id", default="wangyz1999/X-EGO-CS")
     ap.add_argument("--paper", default="https://arxiv.org/abs/2510.19150")
     ap.add_argument("--code", default="https://github.com/wangyz1999/multi-ego-cs")
+    ap.add_argument("--version-label", default="v2",
+                    help="release label shown in the update banner")
+    ap.add_argument("--version-date", default=None,
+                    help="release date for the banner (default: today, YYYY-MM)")
+    ap.add_argument("--previous-matches", type=int, default=None,
+                    help="match count of the previous release, for the banner deltas")
     args = ap.parse_args()
 
     release = Path(args.release)
@@ -375,7 +433,14 @@ def main() -> int:
     if not summary.exists():
         raise SystemExit(f"No manifest at {summary} - run `mecs package` first.")
 
-    card = build(release, args.repo_id, args.paper, args.code)
+    from datetime import date
+
+    card = build(
+        release, args.repo_id, args.paper, args.code,
+        version_label=args.version_label,
+        version_date=args.version_date or date.today().strftime("%B %Y"),
+        previous_matches=args.previous_matches,
+    )
     out = Path(args.out)
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(card, encoding="utf-8")
