@@ -46,6 +46,7 @@ def build(
     repo_id: str,
     paper: str,
     code: str,
+    paper_code: str = "https://github.com/HATS-ICT/x-ego",
     version_label: str = "v2",
     version_date: str = "",
     previous_matches: int | None = None,
@@ -221,7 +222,22 @@ configs:
 with a 64 Hz stream of that player's exact keyboard, mouse and view-angle
 inputs — all on a common, measured clock.**
 
-[Paper]({paper}) · [Collection pipeline]({code})
+[Paper]({paper}) · [Paper code]({paper_code}) · [Collection pipeline]({code})
+
+## Cross-Ego Demo (Pistol Round)
+
+<video controls poster="https://huggingface.co/datasets/{repo_id}/resolve/main/assets/multi-ego-sync-demo-pistol-poster.jpg" width="100%">
+  <source src="https://huggingface.co/datasets/{repo_id}/resolve/main/assets/multi-ego-sync-demo-pistol-h264.mp4" type="video/mp4">
+  <source src="https://huggingface.co/datasets/{repo_id}/resolve/main/multi-ego-sync-demo-pistol.mp4" type="video/mp4">
+  Your browser cannot play this video —
+  <a href="https://huggingface.co/datasets/{repo_id}/resolve/main/assets/multi-ego-sync-demo-pistol-h264.mp4">download it instead</a>.
+</video>
+
+All ten players' points of view, from the same pistol round, on one clock.
+
+**Note:** this demo concatenates the ten streams into a grid for display. The
+dataset itself ships them as **individual per-player POV recordings** — the
+grid is not a dataset artifact.
 
 {banner}
 
@@ -235,6 +251,14 @@ inputs — all on a common, measured clock.**
 | Matches with tick-level actions | {_fmt(n_with_actions)} |
 | Clips with actions | {cov['actions_pct']:.1f}% |
 | Clips with measured video↔tick alignment | {cov['alignment_pct']:.1f}% |
+
+Introduced in:
+
+> **X-Ego: Acquiring Team-Level Tactical Situational Awareness via
+> Cross-Egocentric Contrastive Video Representation Learning**
+> *Yunzhe Wang, Soham Hans, Volkan Ustun*
+> University of Southern California, Institute for Creative Technologies (2025)
+> [arXiv:2510.19150]({paper})
 
 ## What makes this different
 
@@ -314,6 +338,28 @@ its columns but now indexes all {_fmt(n_rounds)} rounds instead of a subset.
 
 Rather than hard-coding any of these paths, read them from the manifest:
 `clips.csv` carries `video_path`, `actions_path` and `align_path` per clip.
+
+## How to download
+
+```bash
+pip install --upgrade huggingface_hub
+
+# Everything (~420 GB — see below for lighter options)
+hf download {repo_id} --repo-type dataset \\
+  --local-dir ./X-EGO-CS --max-workers 8
+```
+
+The full corpus is large because of the video. To pull only what you need:
+
+```bash
+# Manifests + action data + alignment, no video (~5 GB)
+hf download {repo_id} --repo-type dataset --local-dir ./X-EGO-CS \\
+  --include "manifest/*" "metadata/*" "align/*" "state_action/*"
+
+# One match's video
+hf download {repo_id} --repo-type dataset --local-dir ./X-EGO-CS \\
+  --include "video/<match_id>/*"
+```
 
 ## Usage
 
@@ -397,11 +443,11 @@ deanonymisation.
 ## Citation
 
 ```bibtex
-@article{{wang2025xego,
-  title  = {{X-Ego-CS: A Dataset for Cross-Egocentric Multi-Agent Video Understanding}},
-  author = {{Wang, Yunzhe and others}},
-  journal= {{arXiv preprint arXiv:2510.19150}},
-  year   = {{2025}}
+@article{{wang2025x,
+  title={{X-Ego: Acquiring Team-Level Tactical Situational Awareness via Cross-Egocentric Contrastive Video Representation Learning}},
+  author={{Wang, Yunzhe and Hans, Soham and Ustun, Volkan}},
+  journal={{arXiv preprint arXiv:2510.19150}},
+  year={{2025}}
 }}
 ```
 
@@ -420,6 +466,8 @@ def main() -> int:
     ap.add_argument("--repo-id", default="wangyz1999/X-EGO-CS")
     ap.add_argument("--paper", default="https://arxiv.org/abs/2510.19150")
     ap.add_argument("--code", default="https://github.com/wangyz1999/multi-ego-cs")
+    ap.add_argument("--paper-code", default="https://github.com/HATS-ICT/x-ego",
+                    help="the paper's own codebase (separate from the collection pipeline)")
     ap.add_argument("--version-label", default="v2",
                     help="release label shown in the update banner")
     ap.add_argument("--version-date", default=None,
@@ -437,6 +485,7 @@ def main() -> int:
 
     card = build(
         release, args.repo_id, args.paper, args.code,
+        paper_code=args.paper_code,
         version_label=args.version_label,
         version_date=args.version_date or date.today().strftime("%B %Y"),
         previous_matches=args.previous_matches,

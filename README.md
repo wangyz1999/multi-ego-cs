@@ -11,6 +11,19 @@ This is the collection machinery behind [**X-Ego-CS**](https://huggingface.co/da
 a one-off script, so that anyone can point it at FACEIT and build a comparable
 corpus of their own — 100 matches or 1000.
 
+## See it
+
+**Ten synchronized points of view, one pistol round** — the grid is for display;
+the dataset ships each POV separately.
+
+[![Ten synchronized POVs from one CS2 round](https://huggingface.co/datasets/wangyz1999/X-EGO-CS/resolve/main/assets/multi-ego-sync-demo-pistol-poster.jpg)](https://huggingface.co/datasets/wangyz1999/X-EGO-CS/resolve/main/assets/multi-ego-sync-demo-pistol-h264.mp4)
+
+**One player's video with their actual inputs overlaid** — what stage 05 and
+stage 06 produce together: a 64 Hz action trace on the exact frame that
+produced it.
+
+https://github.com/user-attachments/assets/7f378edb-62e2-46b7-85be-c8e275b16654
+
 ```
  01 discover  ──▶ 02 download ──▶ 03 metadata ──▶ 04 record  ──┐
    FACEIT API       .dem files      rounds +        CS2 +      │
