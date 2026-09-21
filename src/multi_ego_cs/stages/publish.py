@@ -36,7 +36,19 @@ _RETRY_BASE_SECONDS = 15.0
 _RETRY_MAX_SECONDS = 300.0
 
 # Uploaded in this order: cheap and structural first, bulk video last.
-_DEFAULT_ORDER = ["README.md", "manifest", "metadata", "align", "state_action", "video", "demo"]
+# Anything in `include` but missing here is appended AFTER these, so a small
+# structural file left out of this list ends up queued behind ~200 GB of video
+# and stays stale for hours. Keep the two orders in sync.
+_DEFAULT_ORDER = [
+    "README.md",
+    "match_round_partitioned.csv",
+    "manifest",
+    "metadata",
+    "align",
+    "state_action",
+    "video",
+    "demo",
+]
 
 
 def _iter_local_files(release: Path, include: list[str]) -> list[tuple[Path, str]]:

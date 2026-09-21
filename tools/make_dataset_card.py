@@ -248,7 +248,7 @@ the match id, so a match keeps its split as the dataset grows.
 
 ## Changes from v1
 
-If you used an earlier version of this dataset, two things moved:
+If you used an earlier version of this dataset, here is what moved:
 
 | v1 | now | why |
 |---|---|---|
