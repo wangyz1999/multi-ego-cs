@@ -20,9 +20,12 @@ the dataset ships each POV separately.
 
 **One player's video with their actual inputs overlaid** — what stage 05 and
 stage 06 produce together: a 64 Hz action trace on the exact frame that
-produced it.
+produced it. Held keys light up, the mouse indicator tracks
+`usercmd_mouse_dx/dy`, and `Δyaw`/`Δpitch` show the per-tick view change. The
+`Offset` control is stage 06's measurement — set it wrong and the inputs
+visibly desynchronise.
 
-https://github.com/user-attachments/assets/7f378edb-62e2-46b7-85be-c8e275b16654
+[![One player's POV with their 64 Hz inputs overlaid](https://huggingface.co/datasets/wangyz1999/X-EGO-CS/resolve/main/assets/action-overlay-demo-poster.jpg)](https://huggingface.co/datasets/wangyz1999/X-EGO-CS/resolve/main/assets/action-overlay-demo.mp4)
 
 ```
  01 discover  ──▶ 02 download ──▶ 03 metadata ──▶ 04 record  ──┐

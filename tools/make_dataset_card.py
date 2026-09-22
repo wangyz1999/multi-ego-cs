@@ -239,6 +239,24 @@ All ten players' points of view, from the same pistol round, on one clock.
 dataset itself ships them as **individual per-player POV recordings** — the
 grid is not a dataset artifact.
 
+## Action Data + Alignment Demo
+
+<video controls poster="https://huggingface.co/datasets/{repo_id}/resolve/main/assets/action-overlay-demo-poster.jpg" width="100%">
+  <source src="https://huggingface.co/datasets/{repo_id}/resolve/main/assets/action-overlay-demo.mp4" type="video/mp4">
+  Your browser cannot play this video —
+  <a href="https://huggingface.co/datasets/{repo_id}/resolve/main/assets/action-overlay-demo.mp4">download it instead</a>.
+</video>
+
+One player's POV with their **actual inputs drawn on top**, frame by frame:
+held keys light up, the mouse indicator tracks `usercmd_mouse_dx/dy`, and
+`Δyaw`/`Δpitch` read out the per-tick view change — all from the
+`state_action/*.parquet` trajectory for that clip.
+
+The `tick` / `time` readout and the `Offset` control are the point of stage 06:
+video and ticks do not start together, so each clip carries a **measured**
+offset (here `-0.73s`) that pins a frame to the tick that produced it. Set it
+wrong and the inputs visibly desynchronise from the footage.
+
 {banner}
 
 | | |
